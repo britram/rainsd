@@ -65,10 +65,6 @@ type Signature struct {
 	content         []byte
 }
 
-type Object interface {
-	sliceContents() []interface{}
-}
-
 type NameObject string
 
 func (this *NameObject) sliceContents() []interface{} {
@@ -127,8 +123,8 @@ func (this *NamesetObject) sliceContents() []interface{} {
 	return out
 }
 
-// type CertificateObject struct {
-// }
+type CertificateObject struct {
+}
 
 type ServiceObject struct {
 	Hostname      string
@@ -177,11 +173,20 @@ func (this *InfrakeyObject) sliceContents() []interface{} {
 }
 
 type Assertion struct {
-	Name       string
-	Zone       string
-	Context    string
-	Objects    []Object
-	Signatures []Signature
+	Name         string
+	Zone         string
+	Context      string
+	Names        []NameObject
+	IP6Addrs     []IP6AddrObject
+	IP4Addrs     []IP4AddrObject
+	Redirections []RedirectionObject
+	Delegations  []DelegationObject
+	Namesets     []NamesetObject
+	Registrars   []RegistrarObject
+	Registrants  []RegistrantObject
+	Certificate  []CertificateObject
+	Infrakeys    []InfrakeyObject
+	Signatures   []Signature
 }
 
 type AssertionSet struct {
