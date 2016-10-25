@@ -1,6 +1,7 @@
 package rains
 
 import (
+	"github.com/ugorji/go/codec"
 	"time"
 )
 
@@ -53,8 +54,22 @@ const (
 type algorithmType uint
 
 const (
-	ecdsa_256 algorithmType = 2
-	ecdsa_384 algorithmType = 3
+	ECDSA_256 algorithmType = 2
+	ECDSA_384 algorithmType = 3
+)
+
+type notificationType uint
+
+const (
+	Heartbeat           notificationType = 100 // Connection heartbeat
+	Capability          notificationType = 399 // Capability hash not understood
+	MalformedMessage    notificationType = 400 // Malformed message received
+	InconsistentMessage notificationType = 403 // Inconsistent message received
+	NoAssertion         notificationType = 404 // No assertion exists (client protocol only)
+	TooLarge            notificationType = 413 // Message too large
+	ServerError         notificationType = 500 // Unspecified server error
+	NotCapable          notificationType = 501 // Server not capable
+	NotAvailable        notificationType = 504 // No assertion available
 )
 
 type Signature struct {
@@ -67,61 +82,18 @@ type Signature struct {
 
 type NameObject string
 
-func (this *NameObject) sliceContents() []interface{} {
-	out := make([]interface{}, 2)
-	out[0] = ot_name
-	out[1] = *this
-	return out
-}
-
 type IP6AddrObject [16]byte
-
-func (this *IP6AddrObject) sliceContents() []interface{} {
-	out := make([]interface{}, 2)
-	out[0] = ot_ip6_addr
-	out[1] = *this
-	return out
-}
 
 type IP4AddrObject [4]byte
 
-func (this *IP4AddrObject) sliceContents() []interface{} {
-	out := make([]interface{}, 2)
-	out[0] = ot_ip4_addr
-	out[1] = *this
-	return out
-}
-
 type RedirectionObject string
-
-func (this *RedirectionObject) sliceContents() []interface{} {
-	out := make([]interface{}, 2)
-	out[0] = ot_redirection
-	out[1] = *this
-	return out
-}
 
 type DelegationObject struct {
 	Alg     algorithmType
 	Content []byte
 }
 
-func (this *DelegationObject) sliceContents() []interface{} {
-	out := make([]interface{}, 3)
-	out[0] = ot_delegation
-	out[1] = this.Alg
-	out[2] = this.Content
-	return out
-}
-
 type NamesetObject string
-
-func (this *NamesetObject) sliceContents() []interface{} {
-	out := make([]interface{}, 2)
-	out[0] = ot_nameset
-	out[1] = *this
-	return out
-}
 
 type CertificateObject struct {
 }
@@ -132,44 +104,13 @@ type ServiceObject struct {
 	Priority      uint16
 }
 
-func (this *ServiceObject) sliceContents() []interface{} {
-	out := make([]interface{}, 4)
-	out[0] = ot_service_info
-	out[1] = this.Hostname
-	out[2] = this.TransportPort
-	out[3] = this.Priority
-	return out
-}
-
 type RegistrarObject string
 
-func (this *RegistrarObject) sliceContents() []interface{} {
-	out := make([]interface{}, 4)
-	out[0] = ot_registrar
-	out[1] = *this
-	return out
-}
-
 type RegistrantObject string
-
-func (this *RegistrantObject) sliceContents() []interface{} {
-	out := make([]interface{}, 4)
-	out[0] = ot_registrar
-	out[1] = *this
-	return out
-}
 
 type InfrakeyObject struct {
 	Alg     algorithmType
 	Content []byte
-}
-
-func (this *InfrakeyObject) sliceContents() []interface{} {
-	out := make([]interface{}, 3)
-	out[0] = ot_infrakey
-	out[1] = this.Alg
-	out[2] = this.Content
-	return out
 }
 
 type Assertion struct {
@@ -187,6 +128,7 @@ type Assertion struct {
 	Certificate  []CertificateObject
 	Infrakeys    []InfrakeyObject
 	Signatures   []Signature
+	parent       *AssertionSet
 }
 
 type AssertionSet struct {
@@ -194,15 +136,25 @@ type AssertionSet struct {
 	Context      string
 	Assertions   []Assertion
 	Signatures   []Signature
-	ShardRange   []string
+	ShardRange   [2]string
 	ZoneComplete bool
 }
 
 type Query struct {
 	Name        string
-	Contexts    []string
+	Context     string
 	ObjectTypes []objectType
 }
 
 type Notification struct {
+	NoteType notificationType
+	NoteData string
+}
+
+type Message struct {
+	Assertions   []Assertion
+	Shards       []AssertionSet
+	Zones        []AssertionSet
+	Capabilities []string
+	token        string
 }
