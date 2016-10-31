@@ -391,9 +391,20 @@ type Query struct {
 	Options     map[QueryOption]bool
 }
 
+// FIXME make this actually look at tokens
+// FIXME new token type?
+// FIXME update rains-protocol to specify 16 bytes for token
+func tokenZero([16]byte) bool {
+	return false
+}
+
 func (q *Query) EmitSection(w *CBORWriter) error {
 	var err error
 	var mapLength int = 2
+
+	if !tokenZero(q.Token) {
+		mapLength++
+	}
 
 	if len(q.ObjectTypes) > 0 {
 		mapLength++
@@ -407,6 +418,11 @@ func (q *Query) EmitSection(w *CBORWriter) error {
 
 	w.WriteInt(sk_query)
 	w.WriteMapStart(mapLength)
+
+	if !tokenZero(q.Token) {
+		w.WriteInt(mk_token)
+		w.WriteBytes(q.Token)
+	}
 
 	w.WriteInt(mk_query_name)
 	w.WriteString(q.Name)
@@ -445,9 +461,11 @@ func (q *Query) EmitSection(w *CBORWriter) error {
 type Notification struct {
 	NoteType NotificationType
 	NoteData string
+	Token    [16]byte
 }
 
 func (q *Notification) EmitSection(w *CBORWriter) error {
+	// FIXME write this
 	return w.CheckError()
 }
 
@@ -457,4 +475,9 @@ type Message struct {
 	Zones        []AssertionSet
 	Capabilities []string
 	Token        [16]byte
+}
+
+func (m *Message) Emit(w *CBORWriter) error {
+	// FIXME write this
+	return w.CheckError()
 }
