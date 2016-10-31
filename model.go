@@ -2,54 +2,47 @@ package rainsd
 
 import (
 	"encoding/binary"
-	"io"
 	"fmt"
+	"io"
 	"time"
 )
 
-type ByteStreamWriter interface {
-	io.Writer
-	io.ByteWriter
-}
-
-type ByteStreamReader interface {
-	io.Reader
-	io.ByteReader
-}
-
 type CBORWriter interface {
-	WriteTag(tag int) error
-	WriteInt(val int) error
-	WriteBytes(val []byte) error
-	WriteString(val string) error
-	WriteBool(val bool) error
-	WriteNull() error
-	WriteMapStart(mlen int) error
-	WriteMapEnd() error
-	WriteArrayStart(alen int) error
-	WriteArrayEnd() error
+	WriteTag(tag int)
+	WriteInt(val int)
+	WriteBytes(val []byte)
+	WriteString(val string)
+	WriteBool(val bool)
+	WriteNull()
+	WriteMapStart(mlen int)
+	WriteMapEnd()
+	WriteArrayStart(alen int)
+	WriteArrayEnd()
+	CheckError() error
 }
 
 const CBORTagUTC int = 1
+const CBORTagRains int = 15309736
 
 // Internal constants and types for CBOR encoding of data model objects
 type mapKey uint
 
 const (
-	mk_content      mapKey = 0  // Content of a message, shard, or zone
-	mk_capabilities mapKey = 1  // Capabilities of server sending message
-	mk_signatures   mapKey = 2  // Signatures on a message or section
-	mk_subject_name mapKey = 3  // Subject name in an assertion
-	mk_subject_zone mapKey = 4  // Zone name in an assertion
-	mk_query_name   mapKey = 5  // Qualified subject name in a query
-	mk_context      mapKey = 6  // Context of an assertion
-	mk_objects      mapKey = 7  // Objects of an assertion
-	mk_token        mapKey = 8  // Token for referring to a data item
-	mk_shard_range  mapKey = 11 // Lexical range of Assertions in Shard
-	mk_query_types  mapKey = 14 // acceptable object types for query
-	mk_note_type    mapKey = 17 // Notification type
-	mk_query_opts   mapKey = 22 // Set of query options requested
-	mk_note_data    mapKey = 23 // Additional notification data
+	mk_signatures     mapKey = 0 // Signatures on a message or section
+	mk_capabilities   mapKey = 1 // Capabilities of server sending message
+	mk_token          mapKey = 2 // Token for referring to a data item
+	mk_subject_name   mapKey = 3 // Subject name in an assertion
+	mk_subject_zone   mapKey = 4 // Zone name in an assertion
+	mk_query_name     mapKey = 5 // Qualified subject name in a query
+	mk_context        mapKey = 6 // Context of an assertion
+	mk_objects        mapKey = 7 // Objects of an assertion
+	mk_query_contexts mapKey = 8
+	mk_query_types    mapKey = 9  // acceptable object types for query
+	mk_query_opts     mapKey = 10 // Set of query options requested
+	mk_shard_range    mapKey = 11 // Lexical range of Assertions in Shard
+	mk_note_type      mapKey = 21 // Notification type
+	mk_note_data      mapKey = 22 // Additional notification data
+	mk_content        mapKey = 23 // Content of a message, shard, or zone
 )
 
 type sectionKey uint
@@ -60,6 +53,18 @@ const (
 	sk_zone         sectionKey = 3  // Zone (see Section 5.6)
 	sk_query        sectionKey = 4  // Query (see Section 5.7)
 	sk_notification sectionKey = 23 // Notification (see Section 5.8)
+)
+
+type QueryOption uint
+
+const (
+	FastOption       QueryOption = 1
+	SmallOption      QueryOption = 2
+	QuietOption      QueryOption = 3
+	SilentOption     QueryOption = 4
+	ExpiredOkOption  QueryOption = 5
+	TokenTraceOption QueryOption = 6
+	NoVerification   QueryOption = 7
 )
 
 type ObjectType uint
@@ -109,114 +114,60 @@ type Signature struct {
 
 type Object interface {
 	Emit(w *CBORWriter) error
+	Answers(otypes map[ObjectType]bool) bool
 }
 
 func (sig *Signature) Emit(w *CBORWriter) error {
-	var err error
-	if err = w.WriteArrayStart(5); err != nil {
-		return err
-	}
-	if err = w.WriteInt(sig.alg); err != nil {
-		return err
-	}
-	if err = w.WriteTag(CBORTagUTC); err != nil {
-		return err
-	}
-	if err = w.WriteInt(sig.validFrom.UTC().Unix()); err != nil {
-		return err
-	}
-	if err = w.WriteTag(CBORTagUTC); err != nil {
-		return err
-	}
-	if err = w.WriteInt(sig.validUntil.UTC().Unix()); err != nil {
-		return err
-	}
-	if err = w.WriteBytes(sig.revocationToken); err != nil {
-		return err
-	}
-	if err = w.WriteBytes(sig.content); err != nil {
-		return err
-	}
-	if err = w.WriteArrayEnd(); err != nil {
-		return err
-	}
-	return nil
+	w.WriteArrayStart(5)
+	w.WriteInt(sig.alg)
+	w.WriteTag(CBORTagUTC)
+	w.WriteInt(sig.validFrom.UTC().Unix())
+	w.WriteTag(CBORTagUTC)
+	w.WriteInt(sig.validUntil.UTC().Unix())
+	w.WriteBytes(sig.revocationToken)
+	w.WriteBytes(sig.content)
+	w.WriteArrayEnd()
+	return w.CheckError()
 }
 
 type NameObject string
 
 func (name *NameObject) Emit(w *CBORWriter) error {
-	var err error
-	if err = w.WriteArrayStart(2); err != nil {
-		return err
-	}
-	if err = w.Int(NameType); err != nil {
-		return err
-	}
-	if err = w.String(string(*name)); err != nil {
-		return err
-	}
-	if err = w.WriteArrayEnd(); err != nil {
-		return err
-	}
-	return nil
+	w.WriteArrayStart(2)
+	w.WriteInt(NameType)
+	w.WriteString(string(*name))
+	w.WriteArrayEnd()
+	return w.CheckError()
 }
 
 type IP6AddrObject [16]byte
 
 func (addr6 *IP6AddrObject) Emit(w *CBORWriter) error {
-	var err error
-	if err = w.WriteArrayStart(2); err != nil {
-		return err
-	}
-	if err = w.WriteInt(Ip6AddrType); err != nil {
-		return err
-	}
-	if err = w.WriteBytes([]byte(*addr6)); err != nil {
-		return err
-	}
-	if err = w.WriteArrayEnd(); err != nil {
-		return err
-	}
-	return nil
+	w.WriteArrayStart(2)
+	w.WriteInt(Ip6AddrType)
+	w.WriteBytes([]byte(*addr6))
+	w.WriteArrayEnd()
+	return w.CheckError()
 }
 
 type IP4AddrObject [4]byte
 
 func (addr4 *IP4AddrObject) Emit(w *CBORWriter) error {
-	var err error
-	if err = w.WriteArrayStart(2); err != nil {
-		return err
-	}
-	if err = w.WriteInt(Ip4AddrType); err != nil {
-		return err
-	}
-	if err = w.WriteBytes([]byte(*addr4)); err != nil {
-		return err
-	}
-	if err = w.WriteArrayEnd(); err != nil {
-		return err
-	}
-	return nil
+	w.WriteArrayStart(2)
+	w.WriteInt(Ip4AddrType)
+	w.WriteBytes([]byte(*addr4))
+	w.WriteArrayEnd()
+	return w.CheckError()
 }
 
 type RedirectionObject string
 
 func (redir *RedirectionObject) Emit(w *CBORWriter) error {
-	var err error
-	if err = w.WriteArrayStart(2); err != nil {
-		return err
-	}
-	if err = w.WriteInt(RedirectionType); err != nil {
-		return err
-	}
-	if err = w.WriteString(string(*redir)); err != nil {
-		return err
-	}
-	if err = w.WriteArrayEnd(); err != nil {
-		return err
-	}
-	return nil
+	w.WriteArrayStart(2)
+	w.WriteInt(RedirectionType)
+	w.WriteString(string(*redir))
+	w.WriteArrayEnd()
+	return w.CheckError()
 }
 
 type DelegationObject struct {
@@ -225,59 +176,32 @@ type DelegationObject struct {
 }
 
 func (deleg *DelegationObject) Emit(w *CBORWriter) error {
-	var err error
-	if err = w.WriteArrayStart(3); err != nil {
-		return err
-	}
-	if err = w.WriteInt(DelegationType); err != nil {
-		return err
-	}
-	if err = w.WriteInt(deleg.Alg); err != nil {
-		return err
-	}
-	if err = w.WriteBytes(deleg.Content); err != nil {
-		return err
-	}
-	if err = w.WriteArrayEnd(); err != nil {
-		return err
-	}
-	return nil
+	w.WriteArrayStart(3)
+	w.WriteInt(DelegationType)
+	w.WriteInt(deleg.Alg)
+	w.WriteBytes(deleg.Content)
+	w.WriteArrayEnd()
+	return w.CheckError()
 }
 
 type NamesetObject string
 
 func (nset *NamesetObject) Emit(w *CBORWriter) error {
-	var err error
-	if err = w.WriteArrayStart(2); err != nil {
-		return err
-	}
-	if err = w.WriteInt(NamesetType); err != nil {
-		return err
-	}
-	if err = w.WriteString(string(*nset)); err != nil {
-		return err
-	}
-	if err = w.WriteArrayEnd(); err != nil {
-		return err
-	}
-	return nil
+	w.WriteArrayStart(2)
+	w.WriteInt(NamesetType)
+	w.WriteString(string(*nset))
+	w.WriteArrayEnd()
+	return w.CheckError()
 }
 
 type CertificateObject struct {
 }
 
 func (cert *CertificateObject) Emit(w *CBORWriter) error {
-	var err error
-	if err = w.WriteArrayStart(1); err != nil {
-		return err
-	}
-	if err = w.WriteInt(CertificateType); err != nil {
-		return err
-	}
-	if err = w.WriteArrayEnd(); err != nil {
-		return err
-	}
-	return nil
+	w.WriteArrayStart(1)
+	w.WriteInt(CertificateType)
+	w.WriteArrayEnd()
+	return w.CheckError()
 }
 
 type ServiceObject struct {
@@ -287,64 +211,33 @@ type ServiceObject struct {
 }
 
 func (svc *ServiceObject) Emit(w *CBORWriter) error {
-	var err error
-	if err = w.WriteArrayStart(4); err != nil {
-		return err
-	}
-	if err = w.WriteInt(ServiceType); err != nil {
-		return err
-	}
-	if err = w.WriteString(svc.Hostname); err != nil {
-		return err
-	}
-	if err = w.WriteInt(svc.TransportPort); err != nil {
-		return err
-	}
-	if err = w.WriteInt(svc.Priority); err != nil {
-		return err
-	}
-	if err = w.WriteArrayEnd(); err != nil {
-		return err
-	}
-	return nil
+	w.WriteArrayStart(4)
+	w.WriteInt(ServiceType)
+	w.WriteString(svc.Hostname)
+	w.WriteInt(svc.TransportPort)
+	w.WriteInt(svc.Priority)
+	w.WriteArrayEnd()
+	return w.CheckError()
 }
 
 type RegistrarObject string
 
 func (reg *RegistrarObject) Emit(w *CBORWriter) error {
-	var err error
-	if err = w.WriteArrayStart(2); err != nil {
-		return err
-	}
-	if err = w.WriteInt(RegistrarType); err != nil {
-		return err
-	}
-	if err = w.WriteString(string(*reg)); err != nil {
-		return err
-	}
-	if err = w.WriteArrayEnd(); err != nil {
-		return err
-	}
-	return nil
+	w.WriteArrayStart(2)
+	w.WriteInt(RegistrarType)
+	w.WriteString(string(*reg))
+	w.WriteArrayEnd()
+	return w.CheckError()
 }
 
 type RegistrantObject string
 
 func (reg *RegistrantObject) Emit(w *CBORWriter) error {
-	var err error
-	if err = w.WriteArrayStart(2); err != nil {
-		return err
-	}
-	if err = w.WriteInt(RegistrantType); err != nil {
-		return err
-	}
-	if err = w.WriteString(string(*reg)); err != nil {
-		return err
-	}
-	if err = w.WriteArrayEnd(); err != nil {
-		return err
-	}
-	return nil
+	w.WriteArrayStart(2)
+	w.WriteInt(RegistrantType)
+	w.WriteString(string(*reg))
+	w.WriteArrayEnd()
+	return w.CheckError()
 }
 
 type InfrakeyObject struct {
@@ -353,23 +246,12 @@ type InfrakeyObject struct {
 }
 
 func (ik *InfrakeyObject) Emit(w *CBORWriter) error {
-	var err error
-	if err = w.WriteArrayStart(3); err != nil {
-		return err
-	}
-	if err = w.WriteInt(InfrakeyType); err != nil {
-		return err
-	}
-	if err = w.WriteInt(ik.Alg); err != nil {
-		return err
-	}
-	if err = w.WriteBytes(ik.Content); err != nil {
-		return err
-	}
-	if err = w.WriteArrayEnd(); err != nil {
-		return err
-	}
-	return nil
+	w.WriteArrayStart(3)
+	w.WriteInt(InfrakeyType)
+	w.WriteInt(ik.Alg)
+	w.WriteBytes(ik.Content)
+	w.WriteArrayEnd()
+	return w.CheckError()
 }
 
 type MessageSection interface {
@@ -377,95 +259,64 @@ type MessageSection interface {
 }
 
 type Assertion struct {
-	Name         string
-	Zone         string
-	Context      string
-	Objects      []Object
-	Signatures   []Signature
-    
-    parent       *AssertionSet
+	Name       string
+	Zone       string
+	Context    string
+	Objects    []Object
+	Signatures []Signature
+
+	parent *AssertionSet
 }
 
 func (a *Assertion) Emit(w *CBORWriter, bare bool) error {
-	var err error
-
-	if err = w.WriteMapStart(bare ? 5 : 3); err != nil {
-		return err
-	}
-
-	if err = w.WriteInt(mk_signatures); err != nil {
-		return err
-	}
-	if err = w.WriteArrayStart(len(a.Signatures)); err != nil {
-		return err
-	}
-	for _, sig := range a.Signatures {
-		if err = sig.Emit(w); err != nil {
-			return err
-		}
-	}
-	if err = w.WriteArrayEnd(); err != nil {
-		return err
-	}
-
-	if err = w.WriteInt(mk_subject_name); err != nil {
-		return err
-	}
-	if err = w.WriteString(a.Name); err != nil {
-		return err
-	}
 
 	if bare {
-		if err = w.WriteInt(mk_subject_zone); err != nil {
-			return err
-		}
-		if err = w.WriteString(a.Zone); err != nil {
-			return err
-		}
-
-		if err = w.WriteInt(mk_context); err != nil {
-			return err
-		}
-		if err = w.WriteString(a.Context); err != nil {
-			return err
-		}
+		w.WriteMapStart(5)
+	} else {
+		w.WriteMapStart(3)
 	}
 
-	if err = w.WriteInt(mk_objects); err != nil {
-		return err
+	w.WriteInt(mk_signatures)
+	w.WriteArrayStart(len(a.Signatures))
+	for _, sig := range a.Signatures {
+		if sig.Emit(w); err != nil {
+			return err
+		}
 	}
-	if err = w.WriteArrayStart(len(a.Objects)); err != nil {
-		return err
-	}
-	for _, o := range(a.Objects) {
-		if err = o.Emit(w); 
-	}
-	if err = w.WriteArrayEnd(); err != nil {
-		return err
+	w.WriteArrayEnd()
+
+	w.WriteInt(mk_subject_name)
+	w.WriteString(a.Name)
+
+	if bare {
+		w.WriteInt(mk_subject_zone)
+		w.WriteString(a.Zone)
+
+		w.WriteInt(mk_context)
+		w.WriteString(a.Context)
 	}
 
-	if err = w.WriteMapEnd(); err != nil {
-		return err
+	w.WriteInt(mk_objects)
+	w.WriteArrayStart(len(a.Objects))
+	for _, o := range a.Objects {
+		if err := o.Emit(w); err != nil {
+			return err
+		}
 	}
+	w.WriteArrayEnd()
 
-	return nil
+	w.WriteMapEnd()
+
+	return w.CheckError()
 }
 
 func (a *Assertion) EmitSection(w *CBORWriter) error {
-	var err error 
-
-	if err = w.WriteArrayStart(2); err != nil {
+	w.WriteArrayStart(2)
+	w.WriteInt(sk_assertion)
+	if err := a.Emit(w, true); err != nil {
 		return err
 	}
-	if err = w.WriteInt(sk_assertion); err != nil {
-		return err
-	}
-	if err = a.Emit(w, true); err != nil {
-		return err
-	}
-	if err = w.WriteArrayEnd(); err != nil {
-		return err
-	}
+	w.WriteArrayEnd()
 }
 
 type AssertionSet struct {
@@ -478,40 +329,117 @@ type AssertionSet struct {
 }
 
 func (as *AssertionSet) EmitSection(w *CBORWriter) error {
-	var err error 
+	var err error
 
-	if err = w.WriteArrayStart(2); err != nil {
-		return err
-	}
+	w.WriteArrayStart(2)
 
 	if as.ZoneComplete {
-		sectionKey = sk_zone
+		w.WriteInt(sk_zone)
 	} else {
-		sectionKey = sk_shard
+		w.WriteInt(sk_shard)
 	}
 
-	if err = w.WriteInt(sectionKey); err != nil {
-		return err
+	if !as.ZoneComplete && (len(as.ShardRange[0]) || len(as.ShardRange[1])) {
+		w.WriteMapStart(5)
+	} else {
+		w.WriteMapStart(4)
 	}
 
-	if err = w.WriteMapStart(); err != nil {
-		return err
+	w.WriteInt(mk_signatures)
+	w.WriteArrayStart(len(as.Signatures))
+	for _, sig := range a.Signatures {
+		if err := sig.Emit(w); err != nil {
+			return err
+		}
+	}
+	w.WriteArrayEnd()
+
+	w.WriteInt(mk_subject_zone)
+	w.WriteString(as.Zone)
+
+	w.WriteInt(mk_context)
+	w.WriteString(as.Context)
+
+	if !as.ZoneComplete && (len(as.ShardRange[0]) || len(as.ShardRange[1])) {
+		w.WriteInt(mk_shard_range)
+		w.WriteArrayStart(2)
+		w.WriteString(as.ShardRange[0])
+		w.WriteString(as.ShardRange[1])
+		w.WriteArrayEnd()
 	}
 
-	// WORK POINTER
-
-	if err = w.WriteMapEnd(); err != nil {
-		return err
+	w.WriteInt(mk_content)
+	w.WriteArrayStart(len(as.Assertions))
+	for _, a := range as.Assertions {
+		if err := a.Emit(w, false); err != nil {
+			return err
+		}
 	}
+	w.WriteArrayEnd()
 
+	w.WriteMapEnd()
 
+	w.WriteArrayEnd()
+	return w.CheckError()
 }
-
 
 type Query struct {
 	Name        string
-	Context     string
+	Contexts    []string
+	Token       [16]byte
 	ObjectTypes map[ObjectType]bool
+	Options     map[QueryOption]bool
+}
+
+func (q *Query) EmitSection(w *CBORWriter) error {
+	var err error
+	var mapLength int = 2
+
+	if len(q.ObjectTypes) > 0 {
+		mapLength++
+	}
+
+	if len(q.Options) > 0 {
+		mapLength++
+	}
+
+	w.WriteArrayStart(2)
+
+	w.WriteInt(sk_query)
+	w.WriteMapStart(mapLength)
+
+	w.WriteInt(mk_query_name)
+	w.WriteString(q.Name)
+
+	w.WriteInt(mk_query_contexts)
+	w.WriteArrayStart(len(q.Contexts))
+	for _, ctx := range q.Contexts {
+		w.WriteString(ctx)
+	}
+	w.WriteArrayEnd()
+
+	if len(q.ObjectTypes) > 0 {
+		w.WriteInt(mk_query_types)
+		w.WriteArrayStart(len(q.ObjectTypes))
+		for qt, _ := range q.ObjectTypes {
+			w.WriteInt(qt)
+		}
+		w.WriteArrayEnd()
+	}
+
+	if len(q.Options) > 0 {
+		w.WriteInt(mk_query_types)
+		w.WriteArrayStart(len(q.Options))
+		for qo, _ := range q.Options {
+			w.WriteInt(qo)
+		}
+		w.WriteArrayEnd()
+	}
+
+	w.WriteMapEnd()
+
+	w.WriteArrayEnd()
+	return w.CheckError()
 }
 
 type Notification struct {
@@ -519,10 +447,14 @@ type Notification struct {
 	NoteData string
 }
 
+func (q *Notification) EmitSection(w *CBORWriter) error {
+	return w.CheckError()
+}
+
 type Message struct {
 	Assertions   []Assertion
 	Shards       []AssertionSet
 	Zones        []AssertionSet
 	Capabilities []string
-	token        string
+	Token        [16]byte
 }
