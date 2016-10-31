@@ -1,9 +1,36 @@
-package rains
+package rainsd
 
 import (
-	"github.com/ugorji/go/codec"
+	"encoding/binary"
+	"io"
+	"fmt"
 	"time"
 )
+
+type ByteStreamWriter interface {
+	io.Writer
+	io.ByteWriter
+}
+
+type ByteStreamReader interface {
+	io.Reader
+	io.ByteReader
+}
+
+type CBORWriter interface {
+	WriteTag(tag int) error
+	WriteInt(val int) error
+	WriteBytes(val []byte) error
+	WriteString(val string) error
+	WriteBool(val bool) error
+	WriteNull() error
+	WriteMapStart(mlen int) error
+	WriteMapEnd() error
+	WriteArrayStart(alen int) error
+	WriteArrayEnd() error
+}
+
+const CBORTagUTC int = 1
 
 // Internal constants and types for CBOR encoding of data model objects
 type mapKey uint
@@ -35,67 +62,222 @@ const (
 	sk_notification sectionKey = 23 // Notification (see Section 5.8)
 )
 
-type objectType uint
+type ObjectType uint
 
 const (
-	ot_name         objectType = 1  // name associated with subject
-	ot_ip6_addr     objectType = 2  // IPv6 address of subject
-	ot_ip4_addr     objectType = 3  // IPv4 address of subject
-	ot_redirection  objectType = 4  // name of zone authority server
-	ot_delegation   objectType = 5  // public key for zone delgation
-	ot_nameset      objectType = 6  // name set expression for zone
-	ot_cert_info    objectType = 7  // certificate information for name
-	ot_service_info objectType = 8  // service information for srvname
-	ot_registrar    objectType = 9  // registrar information
-	ot_registrant   objectType = 10 // registrant information
-	ot_infrakey     objectType = 11 // public key for RAINS infrastructure
+	NameType        ObjectType = 1  // name associated with subject
+	Ip6AddrType     ObjectType = 2  // IPv6 address of subject
+	Ip4AddrType     ObjectType = 3  // IPv4 address of subject
+	RedirectionType ObjectType = 4  // name of zone authority server
+	DelegationType  ObjectType = 5  // public key for zone delgation
+	NamesetType     ObjectType = 6  // name set expression for zone
+	CertificateType ObjectType = 7  // certificate information for name
+	ServiceType     ObjectType = 8  // service information for srvname
+	RegistrarType   ObjectType = 9  // registrar information
+	RegistrantType  ObjectType = 10 // registrant information
+	InfrakeyType    ObjectType = 11 // public key for RAINS infrastructure
 )
 
-type algorithmType uint
+type AlgorithmType uint
 
 const (
-	ECDSA_256 algorithmType = 2
-	ECDSA_384 algorithmType = 3
+	ECDSA_256 AlgorithmType = 2
+	ECDSA_384 AlgorithmType = 3
 )
 
-type notificationType uint
+type NotificationType uint
 
 const (
-	Heartbeat           notificationType = 100 // Connection heartbeat
-	Capability          notificationType = 399 // Capability hash not understood
-	MalformedMessage    notificationType = 400 // Malformed message received
-	InconsistentMessage notificationType = 403 // Inconsistent message received
-	NoAssertion         notificationType = 404 // No assertion exists (client protocol only)
-	TooLarge            notificationType = 413 // Message too large
-	ServerError         notificationType = 500 // Unspecified server error
-	NotCapable          notificationType = 501 // Server not capable
-	NotAvailable        notificationType = 504 // No assertion available
+	Heartbeat           NotificationType = 100 // Connection heartbeat
+	Capability          NotificationType = 399 // Capability hash not understood
+	MalformedMessage    NotificationType = 400 // Malformed message received
+	InconsistentMessage NotificationType = 403 // Inconsistent message received
+	NoAssertion         NotificationType = 404 // No assertion exists (client protocol only)
+	TooLarge            NotificationType = 413 // Message too large
+	ServerError         NotificationType = 500 // Unspecified server error
+	NotCapable          NotificationType = 501 // Server not capable
+	NotAvailable        NotificationType = 504 // No assertion available
 )
 
 type Signature struct {
-	alg             algorithmType
+	alg             AlgorithmType
 	validFrom       time.Time
 	validUntil      time.Time
 	revocationToken []byte
 	content         []byte
 }
 
+type Object interface {
+	Emit(w *CBORWriter) error
+}
+
+func (sig *Signature) Emit(w *CBORWriter) error {
+	var err error
+	if err = w.WriteArrayStart(5); err != nil {
+		return err
+	}
+	if err = w.WriteInt(sig.alg); err != nil {
+		return err
+	}
+	if err = w.WriteTag(CBORTagUTC); err != nil {
+		return err
+	}
+	if err = w.WriteInt(sig.validFrom.UTC().Unix()); err != nil {
+		return err
+	}
+	if err = w.WriteTag(CBORTagUTC); err != nil {
+		return err
+	}
+	if err = w.WriteInt(sig.validUntil.UTC().Unix()); err != nil {
+		return err
+	}
+	if err = w.WriteBytes(sig.revocationToken); err != nil {
+		return err
+	}
+	if err = w.WriteBytes(sig.content); err != nil {
+		return err
+	}
+	if err = w.WriteArrayEnd(); err != nil {
+		return err
+	}
+	return nil
+}
+
 type NameObject string
+
+func (name *NameObject) Emit(w *CBORWriter) error {
+	var err error
+	if err = w.WriteArrayStart(2); err != nil {
+		return err
+	}
+	if err = w.Int(NameType); err != nil {
+		return err
+	}
+	if err = w.String(string(*name)); err != nil {
+		return err
+	}
+	if err = w.WriteArrayEnd(); err != nil {
+		return err
+	}
+	return nil
+}
 
 type IP6AddrObject [16]byte
 
+func (addr6 *IP6AddrObject) Emit(w *CBORWriter) error {
+	var err error
+	if err = w.WriteArrayStart(2); err != nil {
+		return err
+	}
+	if err = w.WriteInt(Ip6AddrType); err != nil {
+		return err
+	}
+	if err = w.WriteBytes([]byte(*addr6)); err != nil {
+		return err
+	}
+	if err = w.WriteArrayEnd(); err != nil {
+		return err
+	}
+	return nil
+}
+
 type IP4AddrObject [4]byte
+
+func (addr4 *IP4AddrObject) Emit(w *CBORWriter) error {
+	var err error
+	if err = w.WriteArrayStart(2); err != nil {
+		return err
+	}
+	if err = w.WriteInt(Ip4AddrType); err != nil {
+		return err
+	}
+	if err = w.WriteBytes([]byte(*addr4)); err != nil {
+		return err
+	}
+	if err = w.WriteArrayEnd(); err != nil {
+		return err
+	}
+	return nil
+}
 
 type RedirectionObject string
 
+func (redir *RedirectionObject) Emit(w *CBORWriter) error {
+	var err error
+	if err = w.WriteArrayStart(2); err != nil {
+		return err
+	}
+	if err = w.WriteInt(RedirectionType); err != nil {
+		return err
+	}
+	if err = w.WriteString(string(*redir)); err != nil {
+		return err
+	}
+	if err = w.WriteArrayEnd(); err != nil {
+		return err
+	}
+	return nil
+}
+
 type DelegationObject struct {
-	Alg     algorithmType
+	Alg     AlgorithmType
 	Content []byte
+}
+
+func (deleg *DelegationObject) Emit(w *CBORWriter) error {
+	var err error
+	if err = w.WriteArrayStart(3); err != nil {
+		return err
+	}
+	if err = w.WriteInt(DelegationType); err != nil {
+		return err
+	}
+	if err = w.WriteInt(deleg.Alg); err != nil {
+		return err
+	}
+	if err = w.WriteBytes(deleg.Content); err != nil {
+		return err
+	}
+	if err = w.WriteArrayEnd(); err != nil {
+		return err
+	}
+	return nil
 }
 
 type NamesetObject string
 
+func (nset *NamesetObject) Emit(w *CBORWriter) error {
+	var err error
+	if err = w.WriteArrayStart(2); err != nil {
+		return err
+	}
+	if err = w.WriteInt(NamesetType); err != nil {
+		return err
+	}
+	if err = w.WriteString(string(*nset)); err != nil {
+		return err
+	}
+	if err = w.WriteArrayEnd(); err != nil {
+		return err
+	}
+	return nil
+}
+
 type CertificateObject struct {
+}
+
+func (cert *CertificateObject) Emit(w *CBORWriter) error {
+	var err error
+	if err = w.WriteArrayStart(1); err != nil {
+		return err
+	}
+	if err = w.WriteInt(CertificateType); err != nil {
+		return err
+	}
+	if err = w.WriteArrayEnd(); err != nil {
+		return err
+	}
+	return nil
 }
 
 type ServiceObject struct {
@@ -104,31 +286,186 @@ type ServiceObject struct {
 	Priority      uint16
 }
 
+func (svc *ServiceObject) Emit(w *CBORWriter) error {
+	var err error
+	if err = w.WriteArrayStart(4); err != nil {
+		return err
+	}
+	if err = w.WriteInt(ServiceType); err != nil {
+		return err
+	}
+	if err = w.WriteString(svc.Hostname); err != nil {
+		return err
+	}
+	if err = w.WriteInt(svc.TransportPort); err != nil {
+		return err
+	}
+	if err = w.WriteInt(svc.Priority); err != nil {
+		return err
+	}
+	if err = w.WriteArrayEnd(); err != nil {
+		return err
+	}
+	return nil
+}
+
 type RegistrarObject string
+
+func (reg *RegistrarObject) Emit(w *CBORWriter) error {
+	var err error
+	if err = w.WriteArrayStart(2); err != nil {
+		return err
+	}
+	if err = w.WriteInt(RegistrarType); err != nil {
+		return err
+	}
+	if err = w.WriteString(string(*reg)); err != nil {
+		return err
+	}
+	if err = w.WriteArrayEnd(); err != nil {
+		return err
+	}
+	return nil
+}
 
 type RegistrantObject string
 
+func (reg *RegistrantObject) Emit(w *CBORWriter) error {
+	var err error
+	if err = w.WriteArrayStart(2); err != nil {
+		return err
+	}
+	if err = w.WriteInt(RegistrantType); err != nil {
+		return err
+	}
+	if err = w.WriteString(string(*reg)); err != nil {
+		return err
+	}
+	if err = w.WriteArrayEnd(); err != nil {
+		return err
+	}
+	return nil
+}
+
 type InfrakeyObject struct {
-	Alg     algorithmType
+	Alg     AlgorithmType
 	Content []byte
+}
+
+func (ik *InfrakeyObject) Emit(w *CBORWriter) error {
+	var err error
+	if err = w.WriteArrayStart(3); err != nil {
+		return err
+	}
+	if err = w.WriteInt(InfrakeyType); err != nil {
+		return err
+	}
+	if err = w.WriteInt(ik.Alg); err != nil {
+		return err
+	}
+	if err = w.WriteBytes(ik.Content); err != nil {
+		return err
+	}
+	if err = w.WriteArrayEnd(); err != nil {
+		return err
+	}
+	return nil
+}
+
+type MessageSection interface {
+	EmitSection(w *CBORWriter) error
 }
 
 type Assertion struct {
 	Name         string
 	Zone         string
 	Context      string
-	Names        []NameObject
-	IP6Addrs     []IP6AddrObject
-	IP4Addrs     []IP4AddrObject
-	Redirections []RedirectionObject
-	Delegations  []DelegationObject
-	Namesets     []NamesetObject
-	Registrars   []RegistrarObject
-	Registrants  []RegistrantObject
-	Certificate  []CertificateObject
-	Infrakeys    []InfrakeyObject
+	Objects      []Object
 	Signatures   []Signature
-	parent       *AssertionSet
+    
+    parent       *AssertionSet
+}
+
+func (a *Assertion) Emit(w *CBORWriter, bare bool) error {
+	var err error
+
+	if err = w.WriteMapStart(bare ? 5 : 3); err != nil {
+		return err
+	}
+
+	if err = w.WriteInt(mk_signatures); err != nil {
+		return err
+	}
+	if err = w.WriteArrayStart(len(a.Signatures)); err != nil {
+		return err
+	}
+	for _, sig := range a.Signatures {
+		if err = sig.Emit(w); err != nil {
+			return err
+		}
+	}
+	if err = w.WriteArrayEnd(); err != nil {
+		return err
+	}
+
+	if err = w.WriteInt(mk_subject_name); err != nil {
+		return err
+	}
+	if err = w.WriteString(a.Name); err != nil {
+		return err
+	}
+
+	if bare {
+		if err = w.WriteInt(mk_subject_zone); err != nil {
+			return err
+		}
+		if err = w.WriteString(a.Zone); err != nil {
+			return err
+		}
+
+		if err = w.WriteInt(mk_context); err != nil {
+			return err
+		}
+		if err = w.WriteString(a.Context); err != nil {
+			return err
+		}
+	}
+
+	if err = w.WriteInt(mk_objects); err != nil {
+		return err
+	}
+	if err = w.WriteArrayStart(len(a.Objects)); err != nil {
+		return err
+	}
+	for _, o := range(a.Objects) {
+		if err = o.Emit(w); 
+	}
+	if err = w.WriteArrayEnd(); err != nil {
+		return err
+	}
+
+	if err = w.WriteMapEnd(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (a *Assertion) EmitSection(w *CBORWriter) error {
+	var err error 
+
+	if err = w.WriteArrayStart(2); err != nil {
+		return err
+	}
+	if err = w.WriteInt(sk_assertion); err != nil {
+		return err
+	}
+	if err = a.Emit(w, true); err != nil {
+		return err
+	}
+	if err = w.WriteArrayEnd(); err != nil {
+		return err
+	}
 }
 
 type AssertionSet struct {
@@ -140,14 +477,45 @@ type AssertionSet struct {
 	ZoneComplete bool
 }
 
+func (as *AssertionSet) EmitSection(w *CBORWriter) error {
+	var err error 
+
+	if err = w.WriteArrayStart(2); err != nil {
+		return err
+	}
+
+	if as.ZoneComplete {
+		sectionKey = sk_zone
+	} else {
+		sectionKey = sk_shard
+	}
+
+	if err = w.WriteInt(sectionKey); err != nil {
+		return err
+	}
+
+	if err = w.WriteMapStart(); err != nil {
+		return err
+	}
+
+	// WORK POINTER
+
+	if err = w.WriteMapEnd(); err != nil {
+		return err
+	}
+
+
+}
+
+
 type Query struct {
 	Name        string
 	Context     string
-	ObjectTypes []objectType
+	ObjectTypes map[ObjectType]bool
 }
 
 type Notification struct {
-	NoteType notificationType
+	NoteType NotificationType
 	NoteData string
 }
 

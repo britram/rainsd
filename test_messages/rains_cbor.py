@@ -1,4 +1,10 @@
 import cbor
+import json
+import time 
+
+import nacl.encoding
+import nacl.signing 
+
 from ipaddress import ip_address
 
 CONTENT       = 0 
@@ -33,7 +39,11 @@ SERVICE_INFO  = 8
 REGISTRAR     = 9 
 REGISTRANT    = 10
 INFRAKEY      = 11
-   
+
+ECDSA_256     = 2
+ED25519       = 4
+
+RAINS_TAG_CHEAT = b'\xda\x00\xe9\x9b\xa8'
 
 test_message = {
     CONTENT: [
@@ -46,8 +56,62 @@ test_message = {
                 [ IP4_ADDR, ip_address("192.0.3.33").packed ],
                 [ IP6_ADDR, ip_address("2001:db8:0:2::33").packed ],
                 [ IP6_ADDR, ip_address("2001:db8:0:3::33").packed ]
-            ]
+            ],
             SIGNATURES : []
         }]
     ]
 }
+
+def sign_assertions_in_message(message, ttl, zone_keys):
+
+    for contents in message[CONTENT]:
+        if contents[0] == ASSERTION:
+            assertion = contents[1]
+            # save signatures
+            saved_signatures = assertion[SIGNATURES]
+
+            # calculate validity
+            time0 = int(time.time())
+            time1 = time0 + ttl
+
+            # create stub signature
+            assertion[SIGNATURES] = [ [ ED25519, time0, time1, 0, None ] ]
+
+            # serialize object to sign
+            bytes_to_sign = cbor.dumps(assertion)
+
+            # sign object
+            signing_key = zone_keys[assertion[SUBJECT_ZONE]][0]
+            signature = signing_key.sign(bytes_to_sign)[:64]
+
+            # add signature back to message
+            assertion[SIGNATURES][0][4] = signature
+
+            # add saved signatures
+            assertion[SIGNATURES] = saved_signatures + assertion[SIGNATURES]
+
+def generate_example_com_key(filename):
+
+    sk = nacl.signing.SigningKey.generate()
+    vk = sk.verify_key
+
+    zk = { "example.com." : [ sk.encode(encoder=nacl.encoding.HexEncoder).decode(), 
+                             vk.encode(encoder=nacl.encoding.HexEncoder).decode() ] }
+
+    with open(filename, mode="w") as f:
+        json.dump(zk, f)
+
+def load_zone_keys(filename):
+    with open(filename) as f:
+        rzk = json.load(f)
+
+    zk = {}
+    for z in rzk:
+        sk = nacl.signing.SigningKey(rzk[z][0], encoder=nacl.encoding.HexEncoder)
+        vk = nacl.signing.VerifyKey(rzk[z][1], encoder=nacl.encoding.HexEncoder)
+        zk[z] = [sk, vk]
+
+    return zk
+
+
+

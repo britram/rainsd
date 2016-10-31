@@ -1,4 +1,4 @@
-package rains
+package rainsd
 
 import (
 	"bufio"
