@@ -7,62 +7,127 @@
 import re
 import cbor
 from ipaddress import ip_address
+from collections import namedtuple
+
+K_SIGNATURES     = 0
+K_CAPABILITIES   = 1 
+K_TOKEN          = 2 
+K_SUBJECT_NAME   = 3 
+K_SUBJECT_ZONE   = 4 
+K_QUERY_NAME     = 5 
+K_CONTEXT        = 6 
+K_OBJECTS        = 7 
+K_QUERY_CONTEXTS = 8
+K_QUERY_TYPES    = 9
+K_QUERY_OPTS     = 10
+K_SHARD_RANGE    = 11
+K_NOTE_TYPE      = 21
+K_NOTE_DATA      = 22
+K_CONTENT        = 23 
+
+SEC_ASSERTION     = 1 
+SEC_SHARD         = 2 
+SEC_ZONE          = 3 
+SEC_QUERY         = 4 
+SEC_NOTIFICATION  = 23
+
+Token = namedtuple("Token", "t", "v")
 
 scanner = re.Scanner([
-    (r"\(",         lambda s,t:("TOK_(",                None)),
-    (r"\)",         lambda s,t:("TOK_)",                None)),
-    (r"\[",         lambda s,t:("TOK_[",                None)),
-    (r"\]",         lambda s,t:("TOK_]",                None)),
-    (r",",          lambda s,t:("TOK_,",                None)),
-    (r":Z:",        lambda s,t:("TOK_ZONE",             None)),
-    (r":S:",        lambda s,t:("TOK_SHARD",            None)),
-    (r":A:",        lambda s,t:("TOK_ASSERTION",        None)),
-    (r":sig:",      lambda s,t:("TOK_SIGNATURE",        None)),
-    (r":ip4:",      lambda s,t:("TOK_IP4_ADDR",         None)),
-    (r":ip6:",      lambda s,t:("TOK_IP6_ADDR",         None)),
-    (r":name:",     lambda s,t:("TOK_NAME",             None)),
-    (r":deleg:",    lambda s,t:("TOK_DELEGATION",       None)),
-    (r":redir:",    lambda s,t:("TOK_REDIRECTION",      None)),
-    (r":cert:",     lambda s,t:("TOK_CERTIFICATE",      None)),
-    (r":infra:",    lambda s,t:("TOK_INFRAKEY",         None)),
-    (r":regr:",     lambda s,t:("TOK_REGISTRAR",        None)),
-    (r":regt:",     lambda s,t:("TOK_REGISTRANT",       None)),
-    (r":srv:",      lambda s,t:("TOK_SERVICE",          None)),
-    (r":[a-zA-Z][a-zA-Z0-9_]*:",
-                    lambda s,t:("TOK_RESERVED",          None)),
+    (r"\(",             lambda s,t:(Token("SYM_(",                None))),
+    (r"\)",             lambda s,t:(Token("SYM_)",                None))),
+    (r"\[",             lambda s,t:(Token("SYM_[",                None))),
+    (r"\]",             lambda s,t:(Token("SYM_]",                None))),
+    (r",",              lambda s,t:(Token("SYM_,",                None))),
+    (r":Z:\s+",         lambda s,t:(Token("SYM_ZONE",             None))),
+    (r":S:\s+",         lambda s,t:(Token("SYM_SHARD",            None))),
+    (r":A:\s+",         lambda s,t:(Token("SYM_ASSERTION",        None))),
+    (r":sig:\s+",       lambda s,t:(Token("SYM_SIGNATURE",        None))),
+    (r":ip4:\s+",       lambda s,t:(Token("SYM_IP4_ADDR",         None))),
+    (r":ip6:\s+",       lambda s,t:(Token("SYM_IP6_ADDR",         None))),
+    (r":name:\s+",      lambda s,t:(Token("SYM_NAME",             None))),
+    (r":deleg:\s+",     lambda s,t:(Token("SYM_DELEGATION",       None))),
+    (r":redir:\s+",     lambda s,t:(Token("SYM_REDIRECTION",      None))),
+    (r":cert:\s+",      lambda s,t:(Token("SYM_CERTIFICATE",      None))),
+    (r":infra:\s+",     lambda s,t:(Token("SYM_INFRAKEY",         None))),
+    (r":regr:\s+",      lambda s,t:(Token("SYM_REGISTRAR",        None))),
+    (r":regt:\s+",      lambda s,t:(Token("SYM_REGISTRANT",       None))),
+    (r":srv:\s+",       lambda s,t:(Token("SYM_SERVICE",          None))),
     (r"\d+\.\d+\.\d+\.\d+",
-                    lambda s,t:("VAL_IP4",     ip_address(t))),
+                        lambda s,t:(Token("VAL_IP4",     ip_address(t)))),
     (r"::",
-                    lambda s,t:("VAL_IP6",     ip_address(t))),
-    (r"([0-9a-fA-F]{1,4}:){8}",
-                    lambda s,t:("VAL_IP6",     ip_address(t))),
-    (r"([0-9a-fA-F]{1,4}:){0,7}::[0-9a-fA-F]{1,4}(:[0-9a-fA-F]{1,4}){0,7}",
-                    lambda s,t:("VAL_IP6",     ip_address(t))),
+                        lambda s,t:(Token("VAL_IP6",     ip_address(t)))),
+    (r"([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}",
+                        lambda s,t:(Token("VAL_IP6",     ip_address(t)))),
+    (r"([0-9a-fA-F]{1,4}:){0,7}:([0-9a-fA-F]{1,4}:){0,7}[0-9a-fA-F]{1,4}",
+                        lambda s,t:(Token("VAL_IP6",     ip_address(t)))),
     (r"\d+-\d+-\d+T\d+:\d+:\d+",
-                    lambda s,t:("VAL_8601",    
-                        (datetime.strptime(t,"%Y-%m-%dT%H:%M:%S") - 
-                         datetime(1970,0,1)).total_seconds())),
+                        lambda s,t:(Token("VAL_8601",    
+                            (datetime.strptime(t,"%Y-%m-%dT%H:%M:%S") - 
+                             datetime(1970,0,1)).total_seconds()))),
+    (r"[1-9][0-9]*",
+                        lambda s,t:(Token("VAL_INT",                 t))),
     (r"[0-9a-fA-F]{2,128}",
-                    lambda s,t:("VAL_HEX",     t)),
-    (r"\S+",        lambda s,t:("VAL_STRING",  t))    
-    (r"\s+",        lambda s,t:None),
-    (r"#\.*\n",     lambda s,t:None)
+                        lambda s,t:(Token("VAL_HEX",                 t))),
+    (r":[a-zA-Z][a-zA-Z0-9_]*:\s+",
+                        lambda s,t:(Token("TOK_RESERVED",         None))),
+    (r"\S+",            lambda s,t:(Token("VAL_STRING",              t))),
+    (r"\s+",            lambda s,t:None),
+    (r"#\.*\n",         lambda s,t:None)
 ])
+
+
+def is_string(tok):
+    return tok.t == "VAL_STRING" || tok.t == "VAL_HEX" || tok_t == "VAL_INT"
+
+def consume_symbol(ts, sym):
+    if ts[0].t != sym:
+        raise ValueError("expected "+str(sym)+", got "+str(ts.v))
+    return ts[1:]
+
+def section(ts):
+    if ts[0].t == "SYM_ZONE":
+        if !is_string(ts[1]) || !isstring(ts[2]) :
+            raise ValueError("missing zone and/or context in :Z:")
+        z, ts = zone(ts[3:], ts[1].v, ts[2].v)
+        return [ SEC_ZONE, z ]
+    elif ts[0][0] == "SYM_SHARD":
+        if !is_string(ts[1]) || !isstring(ts[2]) :
+            raise ValueError("missing zone and/or context in bare :S:")
+        return [ SEC_SHARD, shard(ts[3:], ts[1].v, ts[2].v) ]
+    elif ts[0][0] == "SYM_ASSERTION":
+        if !is_string(ts[1]) || !isstring(ts[2]) :
+            raise ValueError("missing zone and/or context in bare :A:")
+        return [ SEC_ASSERTION, assertion(ts[3:], ts[1].v, ts[2].v) ]
+    else:
+        raise ValueError("expected :Z:, :S:, or :A:")
+
+def zone(ts, zone_name, context_name):
+    out = { K_CONTENT:[] }
+
+    ts = consume_symbol(ts, "SYM_[")
+
+    while ts[0].t != "SYM_]":
+        if ts[0].t == "SYM_SHARD":
+            out[K_CONTENT].append(shard(ts[1:], zone_name, context_name))
+        elif ts[0].t != "SYM_ASSERTION":
+            out[K_CONTENT].append(assertion(ts[1:], zone_name, context_name))
+        else:
+            raise ValueError("expected :S:, :A:, or ]")
+
 
 test_zone_1 = """
 :Z: example.com . [
-    :S: ( , ) [
+    :S: [
         :A: _smtp._tcp [ :srv: mx 25 10 ]
-        :A: aaa [
+        :A: foobaz [
             :ip4: 192.0.2.33
             :ip6: 2001:db8:cffe:7ea::33
         ]
-        :A: aab [
-            :ip4: 192.0.2.33
-            :ip6: 2001:db8:cffe:7ea::33
+        :A: quuxnorg [
+            :ip4: 192.0.3.33
+            :ip6: 2001:db8:cffe:7eb::33
         ]
     ]
-    :S: (aaa_)
-
 ]
 """
