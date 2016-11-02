@@ -34,25 +34,25 @@ SEC_NOTIFICATION  = 23
 Token = namedtuple("Token", "t", "v")
 
 scanner = re.Scanner([
-    (r"\(",             lambda s,t:(Token("SYM_(",                None))),
-    (r"\)",             lambda s,t:(Token("SYM_)",                None))),
-    (r"\[",             lambda s,t:(Token("SYM_[",                None))),
-    (r"\]",             lambda s,t:(Token("SYM_]",                None))),
-    (r",",              lambda s,t:(Token("SYM_,",                None))),
-    (r":Z:\s+",         lambda s,t:(Token("SYM_ZONE",             None))),
-    (r":S:\s+",         lambda s,t:(Token("SYM_SHARD",            None))),
-    (r":A:\s+",         lambda s,t:(Token("SYM_ASSERTION",        None))),
-    (r":sig:\s+",       lambda s,t:(Token("SYM_SIGNATURE",        None))),
-    (r":ip4:\s+",       lambda s,t:(Token("SYM_IP4_ADDR",         None))),
-    (r":ip6:\s+",       lambda s,t:(Token("SYM_IP6_ADDR",         None))),
-    (r":name:\s+",      lambda s,t:(Token("SYM_NAME",             None))),
-    (r":deleg:\s+",     lambda s,t:(Token("SYM_DELEGATION",       None))),
-    (r":redir:\s+",     lambda s,t:(Token("SYM_REDIRECTION",      None))),
-    (r":cert:\s+",      lambda s,t:(Token("SYM_CERTIFICATE",      None))),
-    (r":infra:\s+",     lambda s,t:(Token("SYM_INFRAKEY",         None))),
-    (r":regr:\s+",      lambda s,t:(Token("SYM_REGISTRAR",        None))),
-    (r":regt:\s+",      lambda s,t:(Token("SYM_REGISTRANT",       None))),
-    (r":srv:\s+",       lambda s,t:(Token("SYM_SERVICE",          None))),
+    (r"\(",             lambda s,t:(Token(t,                      None))),
+    (r"\)",             lambda s,t:(Token(t,                      None))),
+    (r"\[",             lambda s,t:(Token(t,                      None))),
+    (r"\]",             lambda s,t:(Token(t,                      None))),
+    (r",",              lambda s,t:(Token(t,                      None))),
+    (r":Z:\s+",         lambda s,t:(Token(t,                      None))),
+    (r":S:\s+",         lambda s,t:(Token(t,                      None))),
+    (r":A:\s+",         lambda s,t:(Token(t,                      None))),
+    (r":sig:\s+",       lambda s,t:(Token(t,                      None))),
+    (r":ip4:\s+",       lambda s,t:(Token(t,                      None))),
+    (r":ip6:\s+",       lambda s,t:(Token(t,                      None))),
+    (r":name:\s+",      lambda s,t:(Token(t,                      None))),
+    (r":deleg:\s+",     lambda s,t:(Token(t,                      None))),
+    (r":redir:\s+",     lambda s,t:(Token(t,                      None))),
+    (r":cert:\s+",      lambda s,t:(Token(t,                      None))),
+    (r":infra:\s+",     lambda s,t:(Token(t,                      None))),
+    (r":regr:\s+",      lambda s,t:(Token(t,                      None))),
+    (r":regt:\s+",      lambda s,t:(Token(t,                      None))),
+    (r":srv:\s+",       lambda s,t:(Token(t,                      None))),
     (r"\d+\.\d+\.\d+\.\d+",
                         lambda s,t:(Token("VAL_IP4",     ip_address(t)))),
     (r"::",
@@ -86,35 +86,53 @@ def consume_symbol(ts, sym):
     return ts[1:]
 
 def section(ts):
-    if ts[0].t == "SYM_ZONE":
+    if ts[0].t == ":S:":
         if !is_string(ts[1]) || !isstring(ts[2]) :
             raise ValueError("missing zone and/or context in :Z:")
         z, ts = zone(ts[3:], ts[1].v, ts[2].v)
         return [ SEC_ZONE, z ]
-    elif ts[0][0] == "SYM_SHARD":
+    elif ts[0][0] == ":S:":
         if !is_string(ts[1]) || !isstring(ts[2]) :
             raise ValueError("missing zone and/or context in bare :S:")
-        return [ SEC_SHARD, shard(ts[3:], ts[1].v, ts[2].v) ]
-    elif ts[0][0] == "SYM_ASSERTION":
+        s, ts = shard(ts[3:], ts[1].v, ts[2].v)
+        return [ SEC_SHARD, s], ts
+    elif ts[0][0] == ":A:":
         if !is_string(ts[1]) || !isstring(ts[2]) :
             raise ValueError("missing zone and/or context in bare :A:")
-        return [ SEC_ASSERTION, assertion(ts[3:], ts[1].v, ts[2].v) ]
+        a, ts = assertion(ts[3:], ts[1].v, ts[2].v)
+        return [ SEC_ASSERTION, a ]
     else:
         raise ValueError("expected :Z:, :S:, or :A:")
 
 def zone(ts, zone_name, context_name):
-    out = { K_CONTENT:[] }
+    out = { K_SUBJECT_NAME: zone_name
+            K_CONTEXT:      context_name
+            K_SIGNATURES:   [] 
+            K_CONTENT:      [] }
 
-    ts = consume_symbol(ts, "SYM_[")
+    ts = consume_symbol(ts, "[")
 
-    while ts[0].t != "SYM_]":
-        if ts[0].t == "SYM_SHARD":
-            out[K_CONTENT].append(shard(ts[1:], zone_name, context_name))
-        elif ts[0].t != "SYM_ASSERTION":
-            out[K_CONTENT].append(assertion(ts[1:], zone_name, context_name))
+    # eat content
+    while ts[0].t != "]":
+        if ts[0].t == ":S:":
+            s, ts = shard(ts[1:], zone_name, context_name)
+            out[K_CONTENT].append(s)
+        elif ts[0].t != ":A:":
+            a, ts = assertion(ts[1:], zone_name, context_name)
+            out[K_CONTENT].append(s)
         else:
             raise ValueError("expected :S:, :A:, or ]")
+    ts = consume_symbol(ts, "]")
 
+    # check for signature
+    if ts[0].t == "(":
+        ts = consume_symbol(ts, "(")
+        while ts[0].t != ")":
+            s, ts = signature(ts)
+            out.K_SIGNATURES.append(s)
+        ts = consume_symbol(")")
+
+    return out, ts
 
 test_zone_1 = """
 :Z: example.com . [
