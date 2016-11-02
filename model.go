@@ -112,11 +112,6 @@ type Signature struct {
 	content         []byte
 }
 
-type Object interface {
-	Emit(w *CBORWriter) error
-	Answers(otypes map[ObjectType]bool) bool
-}
-
 func (sig *Signature) Emit(w *CBORWriter) error {
 	w.WriteArrayStart(5)
 	w.WriteInt(sig.alg)
@@ -128,6 +123,11 @@ func (sig *Signature) Emit(w *CBORWriter) error {
 	w.WriteBytes(sig.content)
 	w.WriteArrayEnd()
 	return w.CheckError()
+}
+
+type Object interface {
+	Emit(w *CBORWriter) error
+	Answers(otypes map[ObjectType]bool) bool
 }
 
 type NameObject string
@@ -279,9 +279,7 @@ func (a *Assertion) Emit(w *CBORWriter, bare bool) error {
 	w.WriteInt(mk_signatures)
 	w.WriteArrayStart(len(a.Signatures))
 	for _, sig := range a.Signatures {
-		if sig.Emit(w); err != nil {
-			return err
-		}
+		sig.Emit(w)
 	}
 	w.WriteArrayEnd()
 
@@ -299,9 +297,7 @@ func (a *Assertion) Emit(w *CBORWriter, bare bool) error {
 	w.WriteInt(mk_objects)
 	w.WriteArrayStart(len(a.Objects))
 	for _, o := range a.Objects {
-		if err := o.Emit(w); err != nil {
-			return err
-		}
+		o.Emit(w)
 	}
 	w.WriteArrayEnd()
 
@@ -313,9 +309,7 @@ func (a *Assertion) Emit(w *CBORWriter, bare bool) error {
 func (a *Assertion) EmitSection(w *CBORWriter) error {
 	w.WriteArrayStart(2)
 	w.WriteInt(sk_assertion)
-	if err := a.Emit(w, true); err != nil {
-		return err
-	}
+	a.Emit(w, true)
 	w.WriteArrayEnd()
 }
 
@@ -348,9 +342,7 @@ func (as *AssertionSet) EmitSection(w *CBORWriter) error {
 	w.WriteInt(mk_signatures)
 	w.WriteArrayStart(len(as.Signatures))
 	for _, sig := range a.Signatures {
-		if err := sig.Emit(w); err != nil {
-			return err
-		}
+		sig.Emit(w)
 	}
 	w.WriteArrayEnd()
 
@@ -371,9 +363,7 @@ func (as *AssertionSet) EmitSection(w *CBORWriter) error {
 	w.WriteInt(mk_content)
 	w.WriteArrayStart(len(as.Assertions))
 	for _, a := range as.Assertions {
-		if err := a.Emit(w, false); err != nil {
-			return err
-		}
+		a.Emit(w, false)
 	}
 	w.WriteArrayEnd()
 
@@ -391,19 +381,26 @@ type Query struct {
 	Options     map[QueryOption]bool
 }
 
-// FIXME make this actually look at tokens
 // FIXME new token type?
 // FIXME update rains-protocol to specify 16 bytes for token
-func tokenZero([16]byte) bool {
-	return false
+
+func tokenZero(t *[16]byte) bool {
+	for b := range *t {
+		if t != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func (q *Query) EmitSection(w *CBORWriter) error {
 	var err error
 	var mapLength int = 2
+	var has_token bool
 
-	if !tokenZero(q.Token) {
+	if !tokenZero(&q.Token) {
 		mapLength++
+		has_token = true
 	}
 
 	if len(q.ObjectTypes) > 0 {
@@ -419,7 +416,7 @@ func (q *Query) EmitSection(w *CBORWriter) error {
 	w.WriteInt(sk_query)
 	w.WriteMapStart(mapLength)
 
-	if !tokenZero(q.Token) {
+	if has_token {
 		w.WriteInt(mk_token)
 		w.WriteBytes(q.Token)
 	}
@@ -464,20 +461,55 @@ type Notification struct {
 	Token    [16]byte
 }
 
-func (q *Notification) EmitSection(w *CBORWriter) error {
-	// FIXME write this
+func (n *Notification) EmitSection(w *CBORWriter) error {
+	var mapLength int = 1
+	var has_token bool
+
+	if !tokenZero(&n.Token) {
+		mapLength++
+		has_token = true
+	}
+
+	if len(NoteData) > 0 {
+		mapLength++
+	}
+
+	w.WriteArrayStart(2)
+	w.WriteInt(sk_notification)
+
+	w.WriteMapStart(mapLength)
+
+	if has_token {
+		w.WriteInt(mk_token)
+		w.WriteBytes(n.Token)
+	}
+
+	w.WriteInt(mk_note_type)
+	w.WriteInt(n.NoteType)
+
+	if len(n.NoteData) > 0 {
+		w.WriteInt(mk_note_data)
+		w.WriteString(n.NoteData)
+	}
+
+	w.WriteMapEnd()
+	w.WriteArrayEnd()
+
 	return w.CheckError()
 }
 
 type Message struct {
-	Assertions   []Assertion
-	Shards       []AssertionSet
-	Zones        []AssertionSet
+	Sections     []MessageSection
 	Capabilities []string
 	Token        [16]byte
 }
 
 func (m *Message) Emit(w *CBORWriter) error {
-	// FIXME write this
+	w.WriteTag(CBORTagRains)
+	w.WriteMapStart(1)
+	w.WriteInt(mk_content)
+	for _, sec := range m.Sections {
+		s.EmitSection(w)
+	}
 	return w.CheckError()
 }
