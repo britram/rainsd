@@ -94,20 +94,19 @@ def section(ts):
     elif ts[0][0] == ":S:":
         if !is_string(ts[1]) || !isstring(ts[2]) :
             raise ValueError("missing zone and/or context in bare :S:")
-        s, ts = shard(ts[3:], ts[1].v, ts[2].v)
+        s, ts = shard(ts[3:], ts[1].v, ts[2].v, True)
         return [ SEC_SHARD, s], ts
     elif ts[0][0] == ":A:":
         if !is_string(ts[1]) || !isstring(ts[2]) :
             raise ValueError("missing zone and/or context in bare :A:")
-        a, ts = assertion(ts[3:], ts[1].v, ts[2].v)
+        a, ts = assertion(ts[3:], ts[1].v, ts[2].v, True)
         return [ SEC_ASSERTION, a ]
     else:
         raise ValueError("expected :Z:, :S:, or :A:")
 
 def zone(ts, zone_name, context_name):
-    out = { K_SUBJECT_NAME: zone_name
+    out = { K_ZONE_NAME:    zone_name
             K_CONTEXT:      context_name
-            K_SIGNATURES:   [] 
             K_CONTENT:      [] }
 
     ts = consume_symbol(ts, "[")
@@ -115,24 +114,82 @@ def zone(ts, zone_name, context_name):
     # eat content
     while ts[0].t != "]":
         if ts[0].t == ":S:":
-            s, ts = shard(ts[1:], zone_name, context_name)
+            s, ts = shard(ts[1:], zone_name, context_name, False)
             out[K_CONTENT].append(s)
         elif ts[0].t != ":A:":
-            a, ts = assertion(ts[1:], zone_name, context_name)
-            out[K_CONTENT].append(s)
+            a, ts = assertion(ts[1:], zone_name, context_name, False)
+            out[K_CONTENT].append(a)
         else:
             raise ValueError("expected :S:, :A:, or ]")
     ts = consume_symbol(ts, "]")
 
+    # and signatures, if present
+    out[K_SIGNATURES], ts = signatures(ts)
+
+    return out, ts
+
+def shard(ts, zone_name, context_name, is_section):
+    out = { K_ZONE_NAME:    zone_name,
+            K_CONTEXT:      context_name,
+            K_SIGNATURES:   []
+            K_CONTENT:      []
+            K_SHARD_RANGE:  [] }
+
+    # check for range
+    if ts[0].t == "(":
+        ts = ts[1:]
+        if is_string(ts[0]):
+            out[K_SHARD_RANGE].append(ts[0].v)
+            ts = consume_symbol(ts[1:],",")
+        elif ts[0].t == ",":
+            out[K_SHARD_RANGE].append(None)
+            ts = ts[1:]
+        else:
+            raise ValueError("expected shard range begin or ,")
+
+        if is_string(ts[0]):
+            out[K_SHARD_RANGE].append(ts[0].v)
+            ts = ts[1:]
+        elif (ts[0].t == ")"):
+            out[K_SHARD_RANGE].append(None)
+        else:
+            raise ValueError("expected shard range end or )")
+        ts = consume_symbol(ts, ")")
+
+    ts = consume_symbol(ts, "[")
+
+    # eat content
+    while ts[0].t != "]":
+        if ts[0].t != ":A:":
+            a, ts = assertion(ts[1:], zone_name, context_name)
+            out[K_CONTENT].append(a)
+        else:
+            raise ValueError("expected :A:, or ]")
+    ts = consume_symbol(ts, "]")    
+
+    # and signatures, if present
+    out[K_SIGNATURES], ts = signatures(ts)
+
+    return out, ts
+
+def assertion(ts, zone_name, context_name, is_section):
+    pass
+
+def signatures(ts)
+    out = []
+
     # check for signature
     if ts[0].t == "(":
-        ts = consume_symbol(ts, "(")
+        ts = ts[1:]
         while ts[0].t != ")":
             s, ts = signature(ts)
-            out.K_SIGNATURES.append(s)
+            out.append(s)
         ts = consume_symbol(")")
 
     return out, ts
+
+def signature(ts):
+    pass
 
 test_zone_1 = """
 :Z: example.com . [
