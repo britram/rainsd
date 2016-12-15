@@ -1,3 +1,5 @@
+// A data model for a RAINS daemon based on recursive-descent parsing of CBOR objects.
+// This is missing reverse lookup support, or any way to read CBOR into the structures.
 package rainsd
 
 import (
@@ -127,6 +129,7 @@ func (sig *Signature) Emit(w *CBORWriter) error {
 
 type Object interface {
 	Emit(w *CBORWriter) error
+	String() string
 	Answers(otypes map[ObjectType]bool) bool
 }
 
@@ -140,6 +143,15 @@ func (name *NameObject) Emit(w *CBORWriter) error {
 	return w.CheckError()
 }
 
+func (name *NameObject) String() string {
+	return *name
+}
+
+func (name *NameObject) Answers(otypes map[ObjectType]bool) bool {
+	_, ok := otypes[NameType]
+	return ok
+}
+
 type IP6AddrObject [16]byte
 
 func (addr6 *IP6AddrObject) Emit(w *CBORWriter) error {
@@ -148,6 +160,15 @@ func (addr6 *IP6AddrObject) Emit(w *CBORWriter) error {
 	w.WriteBytes([]byte(*addr6))
 	w.WriteArrayEnd()
 	return w.CheckError()
+}
+
+func (addr6 *IP6AddrObject) String() string {
+	return net.IP(*addr6).String()
+}
+
+func (addr6 *IP6AddrObject) Answers(otypes map[ObjectType]bool) bool {
+	_, ok := otypes[IP6AddrType]
+	return ok
 }
 
 type IP4AddrObject [4]byte
