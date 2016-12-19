@@ -2,12 +2,50 @@
 
 package rainsd
 
-
 import (
-    "net"
-    "time"
+	"net"
+	"time"
 )
 
+type AssertionCallback func(assertion string) error
+
+type QueryEngine struct {
+	// map of zone caches, keyed by "context zone"
+	zones map[string]ZoneCache
+	// list of pending query requests, managed as a heap
+	pending []QueryRequest
+}
+
+func (*QueryEngine) Assert(assertion string) error {
+
+}
+
+func (*QueryEngine) Query(query string, callback AssertionCallback) error {
+
+}
+
+func (*QueryEngine) Reap() {
+	// expire pending queries
+}
+
+type ZoneCache struct {
+	// keyed by "subject objtype"
+	assertions map[string][]ObjectValue
+	keys       []ZoneKey
+}
+
+type ObjectValue interface {
+	// Convert object to a string for presentation (and use in a short assertion)
+	String() string
+	// Determine whether an object value
+	ValidAt(time.Time) bool
+}
+
+type ZoneKey struct {
+	expires time.Time
+}
+
+/*
 type AssertionCache struct {
     Contexts map[string]ContextCache
     ReapQueue []ExpiryEvent
@@ -48,3 +86,4 @@ type ExpiryEvent struct {
     ValidUntil time.Time
     IdentifierPath []string
 }
+*/
