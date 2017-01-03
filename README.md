@@ -85,8 +85,8 @@ One could/should hack an existing CBOR library to provide these two properties.
 
 ## rainspub design
 
-A RAINS server cannot be tested unless fed with validly signed 
+A RAINS server cannot be tested unless fed with validly signed assertions. rainspub takes input in the form of RAINS zonefiles (see [the zonefile definition](#zonefiles))
 
-### rains zonefiles
+### zonefile Format {#zonefile}
 
-todo: describe the rains zonefile format here
+todo: describe the rains zonefile format here. inspired by BIND zonefiles, close to the wire format, and designed to be easily RDP-parseable.
