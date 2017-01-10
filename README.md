@@ -12,24 +12,81 @@ tools for managing the server. It has the following entry points:
               publishing with `rainspub` for testing purposes.
 
 In addition, the `rainslib` library on which the server and tools are built
-provides common handling for the CBOR-based RAINS information model.
+provides common handling for the CBOR-based RAINS information model. There may
+be a `rainsclientlib` as well for client-side name resolution; bonus points
+for integrating this with the Go net package in an idiomatic way.
 
 ## rainsd architecture and design
 
 The RAINS server itself is made up of several components:
 
-- `engine.go`: the server query engine. The engine consists of three tables: an assertion cache, a pending queries cache, and an authority table. The assertion cache stores assertions this instance knows about. The pending queries cache stores unexpired queries for which assertions are not yet available. The authority table keeps a mapping of zone names to keys, for verifying signatures.
-- `switchboard.go`: the switchboard. The other components of rainsd operate in terms of messages associated with a RAINS server name. the switchboard maintains open connections to other RAINS servers, 
-- `model.go`: data model implementation, marshaling and unmarshaling. 
-- `daemon/main.go`: rainsd main program.
+- A server query engine (`engine.go`): This component stores the assertions
+  the server knows about, the queries it doesn't yet have answers to, and the
+  chains of keys necessary to verify assertions in each zone.
+- A message processor (`inbox.go`): This component processes incoming
+  messages, demarshaling them, verifying their signatures, and handing them to
+  the query engine for further processing.
+- A switchboard (`switchboard.go`): The other components of rainsd operate in
+  terms of messages associated with a RAINS server identity. The switchboard
+  maintains open connections to other RAINS servers using a least-recently used
+  cache, reopening connections that have timed out.
+
+In addition, the RAINS server uses the following component provided by `rainslib`:
+
+- A data model implementation (`model.go`): This component defines the core runtime data types,
+  handles marshaling and unmarshaling of RAINS messages into and out of CBOR, the parsing and
+  generation of RAINS zonefiles, and utilities for signing assertions and verifying signatures.
 
 ### query engine design
 
-The query engine has a simple API, with three entry points.
+The query engine is built around three tables: an *assertion cache*, a
+*pending queries cache*, and an *authority table*.
 
-- assert(assertion): add a signed assertion to the assertion cache. Trigger any pending queries answered by it. Add keys to the authority table if the assertion is a delegation.
-- query(query, callback): add a query to the query cache, and run the specified callback when the query is answerable.
-- reap(): remove expired queries and assertions.
+The assertion cache stores assertions this instance knows about, indexed by
+the fields in a query: context, zone, name, object type. Each entry has an
+expiration time, derived from the last-expiring signature on an assertion, to
+aid in reaping expired entries. The assertion cache should be able to return
+both a value (for internal queries, i.e. when the RAINS server itself needs to
+know another RAINS server's address to connect to it) as well as an assertion
+(in order to answer queries from peers).
+
+Assertions in the assertion cache are assumed to have valid signatures at the
+time of insertion into the assertion cache; it is the responsibility of the
+message processor to check for validity (and to handle errors for invalid
+signatures).
+
+Note that the assertion cache is a candidate for refactoring into `rainslib`
+as it might be useful in the RAINS client implementation, as well.
+
+The pending queries cache stores unexpired queries for which assertions are not yet
+available. A query that cannot be immediately answered is placed into the pending queries cache, and checked against incoming assertions until it expires.
+
+The authority table keeps a mapping of zone names to keys, for verifying signatures. *Open Issue*: this needs to be made available to the message processor, or separated out. 
+
+- - - -
+work pointer
+- - - - 
+
+The query engine has a simple API, with three entry points:
+
+- `assert(assertion)`: add a signed assertion to the assertion cache. Trigger
+   any pending queries answered by it. Add keys to the authority table if the
+   assertion is a delegation.
+- `query(query, callback)`: Run the
+   specified callback when the query is answerable. Do so immediately on an assertion cache hit, or after an assertion is available 
+- `reap()`: remove expired queries, assertions, and delegations. This is
+   probably simply called by a goroutine waiting on a tick channel.
+
+The design of the internal data structures for the query engine is separate
+from that of the `rainslib` data model. The `rainslib` data model is optimized
+to be close to the wire, and easy to marshal/unmarshal to and from CBOR. The
+query engine structures are optimized for fast access given a key (name to
+zone, name to contexts, context/zone/name/type(s) to assertions and/or
+queries). The query engine structures point either to raw assertions or raw
+queries in the `rainslib` data model, as "provenance" for a given question or answer. 
+
+Care must be taken in this design to handle nonexistence proofs based on shards efficiently. 
+
 
 The following protocol features still need to be supported by the prototype query engine:
 
